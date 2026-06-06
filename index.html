@@ -144,6 +144,19 @@ tr:last-child td{border-bottom:none}
 .loc-empty-sub{font-size:12px}
 
 /* MOBILE */
+/* STATS PANEL */
+.stats-panel{background:#fff;border-radius:10px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,0.07);overflow:hidden;border:1.5px solid #e8e8e8;display:none}
+.stats-panel.open{display:block}
+.stats-panel-header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid #f0f0f0;background:#f8f8f8}
+.stats-panel-title{font-size:13px;font-weight:700;color:#333}
+.stats-panel-close{background:none;border:none;cursor:pointer;color:#aaa;font-size:18px;line-height:1}
+.variant-row{display:flex;align-items:center;padding:8px 14px;border-bottom:1px solid #f5f5f5;gap:10px;flex-wrap:wrap}
+.variant-row:last-child{border-bottom:none}
+.variant-name{font-weight:600;font-size:13px;flex-shrink:0}
+.variant-color{font-size:12px;color:#666;flex:1;min-width:60px}
+.variant-code{font-size:11px;color:#aaa;flex-shrink:0;direction:ltr}
+.variant-qty{font-weight:700;font-size:13px;color:#1a1a1a;flex-shrink:0;min-width:50px;text-align:right}
+
 @media(max-width:520px){
   .stats-bar{grid-template-columns:repeat(2,1fr)}
   .stat-value{font-size:17px}
@@ -184,6 +197,13 @@ tr:last-child td{border-bottom:none}
   </div>
 
   <div id="stats-bar" class="stats-bar" style="display:none"></div>
+  <div id="stats-panel" class="stats-panel">
+    <div class="stats-panel-header">
+      <span class="stats-panel-title" id="stats-panel-title"></span>
+      <button class="stats-panel-close" onclick="closeStatsPanel()">✕</button>
+    </div>
+    <div id="stats-panel-list"></div>
+  </div>
 
   <div id="search-section" class="search-section" style="display:none">
     <div class="search-row">
@@ -322,16 +342,14 @@ function toggleCTN(ctn){
   db.ref('opened/'+ctn.replace(/[.#$\/\[\]]/g,'-')).set(newVal||null);
 }
 
-function markStyleCtns(item,data,val){
-  const ctns=[...data.ctns];
+function markStyleCtns(item,ctnsArr,val){
   const updates={};
-  ctns.forEach(ctn=>{updates['opened/'+ctn.replace(/[.#$\/\[\]]/g,'-')]=val||null;});
+  ctnsArr.forEach(ctn=>{updates['opened/'+ctn.replace(/[.#$\/\[\]]/g,'-')]=val||null;});
   db.ref().update(updates);
 }
 
-async function markStyleDone(item,data){
-  // Mark all cartons + send to storage locations
-  await markStyleCtns(item,data,true);
+async function markStyleDone(item,ctnsArr){
+  markStyleCtns(item,ctnsArr,true);
   const key=item.replace(/[.#$\/\[\]]/g,'-');
   await db.ref('completedItems/'+key).set(true);
   notify('✓ '+item+' marked as done — sent to Storage Locations!');
@@ -547,8 +565,8 @@ function render(){
   document.getElementById('stats-bar').style.display='grid';
   document.getElementById('stats-bar').innerHTML=`
     <div class="stat-card"><div class="stat-label">Total Cartons</div><div class="stat-value">${allCtns.length}</div></div>
-    <div class="stat-card"><div class="stat-label">👧 Kids</div><div class="stat-value">${kidsCtns.length}<span class="stat-sub"> (${kidsItems} styles)</span></div></div>
-    <div class="stat-card"><div class="stat-label">👩 Women</div><div class="stat-value">${womenCtns.length}<span class="stat-sub"> (${womenItems} styles)</span></div></div>
+    <div class="stat-card" style="cursor:pointer" onclick="openStatsPanel('kids')"><div class="stat-label">👧 Kids <span style="font-size:10px;color:#bbb">▼</span></div><div class="stat-value">${kidsCtns.length}<span class="stat-sub"> (${kidsItems} styles)</span></div></div>
+    <div class="stat-card" style="cursor:pointer" onclick="openStatsPanel('women')"><div class="stat-label">👩 Women <span style="font-size:10px;color:#bbb">▼</span></div><div class="stat-value">${womenCtns.length}<span class="stat-sub"> (${womenItems} styles)</span></div></div>
     <div class="stat-card progress-card green">
       <div class="stat-label">Opened</div>
       <div class="stat-value">${openedCount}<span class="stat-sub"> / ${allCtns.length}</span></div>
@@ -625,10 +643,10 @@ function renderItemCard(item,data){
       <span class="chevron ${expanded?'open':''}">▼</span>
     </div>`;
   if(expanded){
-    html+=`<div class="item-actions">
-      <button class="btn-mark-all" onclick="markStyleCtns('${item}',${JSON.stringify({ctns:[...data.ctns]})},true)">✓ Mark All Cartons</button>
-      <button class="btn-mark-all" style="background:#666" onclick="markStyleCtns('${item}',${JSON.stringify({ctns:[...data.ctns]})},false)">↩ Unmark All</button>
-      <button class="btn-done" onclick="markStyleDone('${item}',${JSON.stringify({ctns:[...data.ctns]})})">✅ Done → Storage</button>
+    html+=`<div class="item-actions" data-item="${item}" data-ctns="${[...data.ctns].join(',')}">
+      <button class="btn-mark-all" onclick="markFromParent(this,true)">✓ Mark All Cartons</button>
+      <button class="btn-mark-all" style="background:#666" onclick="markFromParent(this,false)">↩ Unmark All</button>
+      <button class="btn-done" onclick="doneFromParent(this)">✅ Done → Storage</button>
     </div>
     <div class="ctn-chips">`+ctns.map(ctn=>{
       const isOpen=!!openedCtns[ctn];
@@ -641,6 +659,64 @@ function renderItemCard(item,data){
     }).join('')+'</div>';
   }
   return html+'</div>';
+}
+
+function openStatsPanel(type){
+  const entries=getCurrentEntries();
+  const panel=document.getElementById('stats-panel');
+  const title=document.getElementById('stats-panel-title');
+  const list=document.getElementById('stats-panel-list');
+  
+  // Filter by type
+  const filtered=entries.filter(e=>type==='kids'?e.item.startsWith('LADD'):e.item.startsWith('ADD'));
+  
+  // Group by item+color
+  const groups={};
+  filtered.forEach(e=>{
+    const key=e.item+'|||'+e.color;
+    if(!groups[key])groups[key]={item:e.item,styleName:e.styleName,color:e.color,qty:0};
+    groups[key].qty+=e.qty;
+  });
+  
+  const rows=Object.values(groups).sort((a,b)=>a.styleName.localeCompare(b.styleName)||a.color.localeCompare(b.color));
+  
+  title.textContent=(type==='kids'?'👧 Kids Styles':'👩 Women Styles')+' — '+rows.length+' variants';
+  
+  list.innerHTML=rows.map(r=>`
+    <div class="variant-row">
+      <span class="variant-name">${r.styleName||r.item}</span>
+      <span class="variant-color">${r.color}</span>
+      <span class="variant-code">${r.item}</span>
+      <span class="variant-qty">${r.qty} pcs</span>
+    </div>`).join('');
+  
+  panel.className='stats-panel open';
+  panel.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+
+function closeStatsPanel(){
+  document.getElementById('stats-panel').className='stats-panel';
+}
+
+function markFromParent(btn,val){
+  const div=btn.closest('.item-actions');
+  const item=div.dataset.item;
+  const ctns=div.dataset.ctns.split(',').filter(Boolean);
+  const updates={};
+  ctns.forEach(ctn=>{updates['opened/'+ctn.replace(/[.#$\/\[\]]/g,'-')]=val||null;});
+  db.ref().update(updates);
+}
+
+async function doneFromParent(btn){
+  const div=btn.closest('.item-actions');
+  const item=div.dataset.item;
+  const ctns=div.dataset.ctns.split(',').filter(Boolean);
+  const updates={};
+  ctns.forEach(ctn=>{updates['opened/'+ctn.replace(/[.#$\/\[\]]/g,'-')]=true;});
+  await db.ref().update(updates);
+  const key=item.replace(/[.#$\/\[\]]/g,'-');
+  await db.ref('completedItems/'+key).set(true);
+  notify('✓ '+item+' marked as done — sent to Storage Locations!');
 }
 
 // Firebase listeners
